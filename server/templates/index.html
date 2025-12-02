@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>통합 주가-뉴스 대시보드</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <style>
+        :root { --primary-color: #4A90E2; --secondary-color: #34495e; --background-color: #f0f2f5; --container-bg: #ffffff; --text-color: #333; --border-color: #e0e0e0; --shadow: 0 4px 12px rgba(0,0,0,0.08); --red: #e74c3c; --green: #2ecc71; --blue: #4A90E2;}
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--background-color); color: var(--text-color); margin: 0; padding: 20px; font-size: 16px; }
+        .container { max-width: 1600px; margin: auto; }
+        .layout-grid { display: grid; grid-template-columns: 280px 1fr; gap: 25px; }
+        .portfolio-sidebar { background: var(--container-bg); padding: 20px; border-radius: 12px; box-shadow: var(--shadow); }
+        .portfolio-sidebar h2 { font-size: 1.5em; color: var(--secondary-color); margin-top: 0; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; }
+        #portfolio-list { list-style: none; padding: 0; max-height: 50vh; overflow-y: auto; }
+        #portfolio-list li { padding: 12px 15px; margin-bottom: 8px; border-radius: 8px; cursor: pointer; transition: all 0.2s ease; display: flex; justify-content: space-between; align-items: center; border: 1px solid transparent; }
+        #portfolio-list li:hover { background-color: #f8f9fa; }
+        #portfolio-list li.active { background-color: var(--primary-color); color: white; font-weight: 600; }
+        #portfolio-list li .stock-name { font-size: 0.8em; color: #7f8c8d; display: block; margin-top: 2px; }
+        #portfolio-list li.active .stock-name { color: #e0e0e0; }
+        .remove-btn { background: #e74c3c; color: white; border: none; border-radius: 50%; cursor: pointer; width: 20px; height: 20px; font-size: 12px; line-height: 20px; text-align: center; opacity: 0; transition: opacity 0.2s ease; }
+        #portfolio-list li:hover .remove-btn { opacity: 1; }
+        .ticker-form { display: flex; gap: 10px; margin-top: 20px; }
+        .ticker-form input { flex-grow: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; }
+        .ticker-form button { padding: 10px 15px; background-color: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer; }
+        .main-dashboard { background: var(--container-bg); padding: 25px; border-radius: 12px; box-shadow: var(--shadow); }
+        #loading-indicator, #welcome-message, #error-message { text-align: center; padding: 80px 20px; font-size: 1.5em; color: #7f8c8d; }
+        #error-message { color: var(--red); }
+        .dashboard-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; margin-bottom: 20px; }
+        #dashboard-title { margin: 0; font-size: 2.2em; }
+        .realtime-info { text-align: right; }
+        #current-price { font-size: 2.2em; font-weight: bold; color: var(--secondary-color); }
+        #update-time { font-size: 0.9em; color: #7f8c8d; margin-top: 5px; }
+        .chart-container { position: relative; width: 100%; }
+        .chart-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 20px;}
+        .control-btn { padding: 8px 15px; border: 1px solid var(--border-color); border-radius: 20px; cursor: pointer; background-color: white; transition: all 0.2s ease; }
+        .control-btn.active { font-weight: bold; color: white; }
+        .mode-switch { display: flex; border: 1px solid var(--border-color); border-radius: 8px; margin-top: 25px; padding: 3px; }
+        .mode-switch button { flex: 1; padding: 8px; background: none; border: none; cursor: pointer; font-size: 0.9em; transition: all 0.2s ease; border-radius: 6px; }
+        .mode-switch button.active { background-color: var(--primary-color); color: white; font-weight: 600; }
+        .period-controls { margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 15px; }
+        .period-controls h3 { margin: 0 0 10px 0; font-size: 1.1em; color: var(--secondary-color); }
+        #period-buttons { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        .period-btn { padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; background-color: white; cursor: pointer; text-align: center; transition: all 0.2s ease; }
+        .period-btn.disabled { cursor: not-allowed; background-color: #f8f9fa; color: #bdc3c7; opacity: 0.7; }
+        .period-btn:not(.disabled):hover { background-color: #f0f2f5; }
+        .period-btn.active { background-color: var(--secondary-color); color: white; border-color: var(--secondary-color); font-weight: 600; }
+        .recommendation-section { margin-top: 40px; border-top: 1px solid var(--border-color); padding-top: 20px; }
+        .recommendation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+        .recommendation-box h3 { font-size: 1.2em; color: var(--secondary-color); margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        .recommendation-list { list-style: none; padding: 0; margin: 0; }
+        .recommendation-list li { padding: 10px; border-radius: 6px; cursor: pointer; transition: background-color 0.2s ease; display: flex; justify-content: space-between; align-items: center; font-size: 0.95em; }
+        .recommendation-list li:hover { background-color: #f8f9fa; }
+        .rec-name { font-weight: 600; font-size: 1em; }
+        .rec-ticker { font-size: 0.9em; color: #7f8c8d; margin-left: 8px; }
+        .rec-change { font-weight: 600; color: var(--green); }
+        .rec-change.down { color: var(--red); }
+
+        /* News Analysis Specific Styles (유지) */
+        .news-controls { margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 15px; }
+        .news-controls h3 { margin: 0 0 10px 0; font-size: 1.1em; color: var(--secondary-color); }
+        #news-buttons { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        .news-btn { padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; background-color: white; cursor: pointer; text-align: center; transition: all 0.2s ease; font-size: 0.85em; }
+        .news-btn.active { background-color: var(--primary-color); color: white; border-color: var(--primary-color); font-weight: 600; }
+        #news-analysis-content { padding: 20px; border-radius: 8px; background-color: #f8f9fa; border: 1px solid var(--border-color); }
+        .analysis-result-box { margin-bottom: 25px; padding: 15px; border-radius: 8px; background-color: var(--container-bg); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .analysis-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid; padding-bottom: 10px; margin-bottom: 15px; }
+        #analysis-final-label { font-size: 1.8em; font-weight: bold; }
+        .sentiment-positive { color: var(--green); border-color: var(--green); }
+        .sentiment-negative { color: var(--red); border-color: var(--red); }
+        .sentiment-neutral { color: var(--secondary-color); border-color: var(--secondary-color); }
+        .original-text { font-size: 0.95em; line-height: 1.6; color: #555; background-color: #fcfcfc; padding: 10px; border-radius: 4px; border-left: 3px solid var(--primary-color); }
+        .model-comparison p { font-size: 0.9em; margin: 5px 0; color: #7f8c8d; }
+    </style>
+</head>
+<body>
+    <div class="container layout-grid">
+        <aside class="portfolio-sidebar">
+            <h2>📂 포트폴리오</h2>
+            <ul id="portfolio-list"></ul>
+            <div class="ticker-form">
+                <input type="text" id="ticker-input" placeholder="e.g., AAPL, 005930.KS">
+                <button id="add-ticker-btn">+</button>
+            </div>
+            <div class="mode-switch">
+                <button id="mode-simple" class="active">주가 차트</button>
+                <button id="mode-ai">AI 분석</button>
+                <button id="mode-news">BERT 분석</button> <button id="mode-llm">LLM 분석</button>   </div>
+            <div class="period-controls">
+                <h3 id="period-title">기간 설정</h3>
+                <div id="period-buttons"></div>
+            </div>
+            <div class="news-controls" style="display: none;">
+                <h3>📰 뉴스 분석 방식</h3>
+                <div id="news-buttons">
+                    <button class="news-btn active" data-index="0">뉴스 1 (최신)</button>
+                    <button class="news-btn" data-index="1">뉴스 2</button>
+                    <button class="news-btn" data-index="2">뉴스 3</button>
+                    <button class="news-btn" data-index="3">뉴스 4</button>
+                    <button class="news-btn" data-index="4">뉴스 5</button>
+                </div>
+            </div>
+        </aside>
+        <main class="main-dashboard">
+            <div id="welcome-message">
+                <p>좌측 목록에서 종목을 선택하고<br>원하는 분석 모드를 시작하세요.</p>
+                <p style="font-size: 0.8em; color: #7f8c8d; margin-top: 20px;">
+                    <b>주가 차트:</b> 단순 주가 추이 확인 (빠름)<br>
+                    <b>AI 분석:</b> 여러 예측 모델 성능 비교 (느림)<br>
+                    <b>BERT 분석:</b> 기사 문장 단위 감성 분석 (빠름)<br>
+                    <b>LLM 분석:</b> 기사 전체 맥락 기반 심층 분석 (느림)
+                </p>
+            </div>
+            <div id="loading-indicator" style="display: none;"></div>
+            <div id="error-message" style="display: none;"></div>
+            
+            <div id="dashboard-content" style="display: none;">
+                <div class="dashboard-header">
+                    <h1 id="dashboard-title"></h1>
+                    <div class="realtime-info">
+                        <div id="current-price">-</div>
+                        <div id="update-time">Loading...</div>
+                    </div>
+                </div>
+                
+                <h2 id="chart-main-title"></h2>
+                
+                <div id="simple-chart-container" class="chart-container" style="height: 450px;">
+                    <canvas id="simpleChart"></canvas>
+                </div>
+
+                <div id="ai-chart-container" style="display: none;">
+                    <div class="chart-controls" id="historical-controls"></div>
+                    <div class="chart-container" style="height: 450px;">
+                        <canvas id="historicalChart"></canvas>
+                    </div>
+                </div>
+
+                <div id="news-container" style="display: none;">
+                    <div class="analysis-result-box" id="analysis-result-box">
+                        <div class="analysis-header">
+                            <h3>뉴스 제목: <span id="news-article-index"></span></h3>
+                            <div id="analysis-final-label"></div>
+                        </div>
+
+                        <div id="llm-summary-section" style="display: none;">
+                            <h4 style="margin-top: 20px; color: var(--secondary-color);">✨ 요약 (Gemini):</h4>
+                            <div class="original-text" id="llm-summary" style="margin-bottom: 25px;"></div>
+                            <h4 style="margin-top: 20px; color: var(--secondary-color);">🔑 주요 감성 근거:</h4>
+                            <ul id="llm-key-points" style="list-style-type: disc; margin-left: 20px; padding-left: 0;"></ul>
+                        </div>
+                        
+                        <div id="bert-analysis-section">
+                            <div class="model-comparison" id="model-comparison"></div>
+                            <h4 style="margin-top: 20px; color: var(--secondary-color);">✨ 분석에 사용된 주요 문장 (총 <span id="total-sentences"></span>개):</h4>
+                            <div class="original-text" id="analyzed-sentences-list" style="margin-bottom: 25px;"></div>
+                        </div>
+                        
+                        <h4 style="margin-top: 20px; color: var(--secondary-color);">📰 원문 전체:</h4>
+                        <div class="original-text" id="news-original-text"></div>
+                    </div>
+                    <p style="font-size: 0.85em; color: #7f8c8d; text-align: center; margin-top: 10px;">
+                        <span id="analysis-note">분석은 상위 5개 문장을 기반으로 합니다.</span>
+                    </p>
+                </div>
+                
+                <div id="recommendation-area" class="recommendation-section" style="display: none;">
+                    <div class="recommendation-grid">
+<div class="recommendation-box">
+    <h3>산업별 종목 보기</h3>
+    <select id="industry-select-dropdown" style="width: 100%; padding: 8px; margin-bottom: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+        <option value="">-- 산업 선택 --</option>
+    </select>
+    <ul id="industry-stocks-list" class="recommendation-list" style="max-height: 200px; overflow-y: auto;">
+        <li><span>산업을 선택하세요.</span></li>
+    </ul>
+</div>
+                        <div class="recommendation-box">
+                            <h3>🚀 ai예측 상승률 Top 5</h3>
+                            <ul id="top-movers-list" class="recommendation-list"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const $ = (id) => document.getElementById(id);
+    
+    let currentMode = 'simple';
+    let activeTicker = null;
+    let simpleChart, historicalChart;
+    let portfolio = JSON.parse(localStorage.getItem('stockPortfolio')) || ['005930.KS', 'AAPL', 'TSLA'];
+    const socket = io();
+    
+    socket.on('connect', () => {
+        console.log(`%cSOCKET CONNECTED: ${socket.id}`, 'color: #2ecc71; font-weight: bold;');
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.log(`%cSOCKET DISCONNECTED: ${reason}`, 'color: #e74c3c; font-weight: bold;');
+    });
+
+    socket.onAny((eventName, ...args) => {
+        console.log(`%cEVENT RECEIVED: ${eventName}`, 'color: #4A90E2; font-weight: bold;', ...args);
+    });
+    
+    const chartColors = ['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6'];
+    let priceUpdateInterval;
+    let isTraining = false;
+    let stockNameCache = {};
+    let historicalDataCacheForUpdate = {};
+    let lastAnalyzedIndex = -1; 
+    let watchlist = JSON.parse(localStorage.getItem('stockWatchlist')) || [];
+
+    const ui = {
+        modeSimpleBtn: $('mode-simple'),
+        modeAiBtn: $('mode-ai'),
+        modeNewsBtn: $('mode-news'), 
+        modeLlmBtn: $('mode-llm'), // 새 요소 추가
+        newsControls: document.querySelector('.news-controls'), 
+        newsButtons: $('news-buttons'), 
+        periodControls: document.querySelector('.period-controls'), 
+        periodButtonsContainer: $('period-buttons'),
+        welcome: $('welcome-message'),
+        loading: $('loading-indicator'),
+        error: $('error-message'),
+        dashboard: $('dashboard-content'),
+        title: $('dashboard-title'),
+        chartTitle: $('chart-main-title'),
+        simpleChartContainer: $('simple-chart-container'),
+        aiChartContainer: $('ai-chart-container'),
+        newsContainer: $('news-container'), 
+        historicalControls: $('historical-controls'),
+        tickerInput: $('ticker-input'),
+        addTickerBtn: $('add-ticker-btn'),
+        portfolioList: $('portfolio-list'),
+        currentPrice: $('current-price'),
+        updateTime: $('update-time'),
+        recommendationArea: $('recommendation-area'),
+        industrySelect: $('industry-select-dropdown'),
+        industryStocksList: $('industry-stocks-list'),
+        topMoversList: $('top-movers-list'),
+        
+        // 뉴스 분석 결과 요소
+        newsArticleIndex: $('news-article-index'),
+        analysisResultBox: $('analysis-result-box'),
+        analysisFinalLabel: $('analysis-final-label'),
+        modelComparison: $('model-comparison'),
+        newsOriginalText: $('news-original-text'),
+        analyzedSentencesList: $('analyzed-sentences-list'),
+        totalSentences: $('total-sentences'),
+        maxAnalyzedSentencesCount: $('max-analyzed-sentences-count'),
+        
+        // LLM 분석 결과 요소 추가
+        llmSummarySection: $('llm-summary-section'),
+        bertAnalysisSection: $('bert-analysis-section'),
+        llmSummary: $('llm-summary'),
+        llmKeyPoints: $('llm-key-points'),
+        analysisNote: $('analysis-note'),
+    };
+
+    const periods = {
+        simple: [
+            { label: '1일', val: '1d' }, { label: '1주', val: '7d' }, { label: '1개월', val: '1mo' },
+            { label: '3개월', val: '3mo' }, { label: '6개월', val: '6mo' }, { label: '1년', val: '1y' },
+            { label: '3년', val: '3y' }, { label: '5년', val: '5y' }, { label: '전체', val: 'max' }
+        ],
+        ai: [
+            { label: '6개월', val: 180 }, { label: '1년', val: 365 }, { label: '전체', val: 1095, active: true }
+        ]
+    };
+    
+    // --- 유틸리티 함수 ---
+    function formatCurrency(price, ticker) {
+        if (price === null || price === undefined) return '-';
+        const options = ticker?.endsWith('.KS') ? { style: 'currency', currency: 'KRW' } : { style: 'currency', currency: 'USD' };
+        return new Intl.NumberFormat(ticker?.endsWith('.KS') ? 'ko-KR' : 'en-US', options).format(price);
+    }
+    
+    async function fetchAndCacheStockNames(tickers) {
+        const tickersToFetch = tickers.filter(t => !stockNameCache[t]);
+        if (tickersToFetch.length === 0) return;
+        try {
+            const response = await fetch('http://127.0.0.1:5000/get_stock_names', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tickers: tickersToFetch })
+            });
+            if (!response.ok) return;
+            const names = await response.json();
+            Object.assign(stockNameCache, names);
+        } catch (error) {
+            console.error("종목 이름 조회 실패:", error);
+        }
+    }
+    
+    function setUIState(state) {
+        // 모든 컨텐츠 숨기기
+        ui.welcome.style.display = 'none';
+        ui.loading.style.display = 'none';
+        ui.error.style.display = 'none';
+        ui.dashboard.style.display = 'none';
+        ui.simpleChartContainer.style.display = 'none';
+        ui.aiChartContainer.style.display = 'none';
+        ui.newsContainer.style.display = 'none'; 
+        
+        // 상태별 컨텐츠 표시
+        if (state === 'welcome') ui.welcome.style.display = 'block';
+        if (state === 'loading') {
+            ui.loading.style.display = 'block';
+            ui.loading.innerHTML = currentMode === 'ai' 
+                ? '<p>🧠 AI 모델 학습 중... (최대 1~3분 소요)</p>' 
+                : currentMode === 'bert' 
+                ? '<p>📰 BERT 분석: 유효한 문장 찾는 중... (빠름)</p>'
+                : currentMode === 'llm'
+                ? '<p>📰 LLM 분석: 기사 전문을 Gemini API로 보내는 중... (10~30초 소요)</p>'
+                : '<p>⏳ 데이터 로딩 중...</p>';
+        }
+        if (state === 'error') ui.error.style.display = 'block';
+        if (state === 'content') {
+            ui.dashboard.style.display = 'block';
+            if (currentMode === 'simple') ui.simpleChartContainer.style.display = 'block';
+            if (currentMode === 'ai') ui.aiChartContainer.style.display = 'block';
+            if (currentMode === 'bert' || currentMode === 'llm') ui.newsContainer.style.display = 'block'; 
+        }
+    }
+    
+    function setControlsDisabled(disabled) {
+        isTraining = disabled;
+        ui.portfolioList.style.pointerEvents = disabled ? 'none' : 'auto';
+        ui.periodButtonsContainer.style.pointerEvents = disabled ? 'none' : 'auto';
+        ui.modeSimpleBtn.disabled = disabled;
+        ui.modeAiBtn.disabled = disabled;
+        ui.modeNewsBtn.disabled = disabled; 
+        ui.modeLlmBtn.disabled = disabled;
+        
+        const opacity = disabled ? 0.5 : 1.0;
+        ui.portfolioList.style.opacity = opacity;
+        ui.periodButtonsContainer.style.opacity = opacity;
+        ui.modeSimpleBtn.style.opacity = opacity;
+        ui.modeAiBtn.style.opacity = opacity;
+        ui.modeNewsBtn.style.opacity = opacity; 
+        ui.modeLlmBtn.style.opacity = opacity;
+        if(ui.newsButtons) ui.newsButtons.style.pointerEvents = disabled ? 'none' : 'auto'; 
+    }
+    
+    function getActivePeriod() {
+        const activeBtn = ui.periodButtonsContainer.querySelector('.period-btn.active');
+        return activeBtn ? activeBtn.dataset.value : (currentMode === 'simple' ? '1y' : 1095);
+    }
+    
+    // --- 메인 렌더링 및 분석 시작 ---
+
+    function switchMode(newMode) {
+        if (isTraining || currentMode === newMode) return;
+        currentMode = newMode;
+        
+        // 버튼 활성화/비활성화 시각적 효과
+        ui.modeSimpleBtn.classList.toggle('active', newMode === 'simple');
+        ui.modeAiBtn.classList.toggle('active', newMode === 'ai');
+        ui.modeNewsBtn.classList.toggle('active', newMode === 'bert'); 
+        ui.modeLlmBtn.classList.toggle('active', newMode === 'llm'); 
+
+        // 컨트롤 표시 여부
+        ui.periodControls.style.display = (newMode === 'simple' || newMode === 'ai') ? 'block' : 'none';
+        ui.newsControls.style.display = (newMode === 'bert' || newMode === 'llm') ? 'block' : 'none'; 
+        
+        // 추천 영역 표시 여부
+        ui.recommendationArea.style.display = (newMode !== 'bert' && newMode !== 'llm') ? 'block' : 'none'; 
+
+        renderPeriodButtons();
+        if (activeTicker) {
+            if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+            startAnalysis(activeTicker);
+        } else {
+            setUIState('welcome');
+        }
+    }
+    
+    function renderPeriodButtons() {
+        // ... (기존 코드 유지)
+        ui.periodButtonsContainer.innerHTML = '';
+        const currentPeriods = periods[currentMode] || periods['simple'];
+        currentPeriods.forEach(p => {
+            const btn = document.createElement('button');
+            btn.className = 'period-btn';
+            btn.innerText = p.label;
+            if(p.active) btn.classList.add('active');
+            
+            const isAiDisabled = currentMode === 'ai' && (p.val === 180 ? false : p.val < 180); 
+            
+            if(isAiDisabled) {
+                btn.classList.add('disabled');
+                btn.title = 'AI 분석은 최소 6개월 이상의 데이터가 필요합니다.';
+            } else {
+                btn.dataset.value = p.val;
+            }
+            ui.periodButtonsContainer.appendChild(btn);
+        });
+    }
+
+    async function renderPortfolio() {
+        // ... (기존 코드 유지)
+        await fetchAndCacheStockNames(portfolio);
+        ui.portfolioList.innerHTML = '';
+        portfolio.forEach(ticker => {
+            const li = document.createElement('li');
+            li.dataset.ticker = ticker;
+            const name = stockNameCache[ticker] || ticker;
+            const displayName = name.length > 20 ? name.substring(0, 20) + '...' : name;
+            li.innerHTML = `<div><span>${ticker}</span><span class="stock-name">${displayName}</span></div><button class="remove-btn">×</button>`;
+            if (ticker === activeTicker) li.classList.add('active');
+            ui.portfolioList.appendChild(li);
+        });
+        localStorage.setItem('stockPortfolio', JSON.stringify(portfolio));
+    }
+
+    async function addTicker() {
+        // ... (기존 코드 유지)
+        const ticker = ui.tickerInput.value.trim().toUpperCase();
+        if (ticker && !portfolio.includes(ticker)) {
+            portfolio.unshift(ticker);
+            ui.tickerInput.value = '';
+            await renderPortfolio();
+        }
+    }
+
+    async function startAnalysis(ticker) {
+        if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+        ui.currentPrice.innerText = '-';
+        ui.updateTime.innerText = 'Loading...';
+        ui.recommendationArea.style.display = 'none';
+        
+        if (!stockNameCache[ticker]) {
+            await fetchAndCacheStockNames([ticker]);
+        }
+        const name = stockNameCache[ticker] || ticker;
+        ui.title.innerText = `${name} (${ticker})`;
+        
+        setUIState('loading');
+        
+        if (currentMode === 'simple') {
+            getAndRenderSimpleChart(ticker);
+        } else if (currentMode === 'ai') { // AI 분석 모드
+            startAiAnalysis(ticker);
+        } else if (currentMode === 'bert' || currentMode === 'llm') { // BERT/LLM 분석 모드
+            startNewsAnalysis(ticker, 0, currentMode); 
+            ui.recommendationArea.style.display = 'none';
+        }
+    }
+
+ function fetchAndDisplayRecommendations() { // ticker 인수 제거
+        fetch('http://127.0.0.1:5000/get_recommendations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}) // 빈 body 전송
+        })
+        .then(res => res.json())
+        .then(data => {
+            // [삭제] similar_stocks 관련 로직 6줄 모두 삭제
+
+            ui.topMoversList.innerHTML = '';
+            if (data.top_movers && data.top_movers.length > 0) {
+                data.top_movers.forEach(stock => {
+                    const li = document.createElement('li');
+                    li.dataset.ticker = stock.ticker;
+                    const isDown = (stock.change.startsWith('-') || parseFloat(stock.change) < 0);
+                    const changeText = parseFloat(stock.change).toFixed(2);
+                    li.innerHTML = `<div><span class="rec-name">${stock.name}</span><span class="rec-ticker">${stock.ticker}</span></div><span class="rec-change ${isDown ? 'down' : ''}">${isDown ? '▼' : '▲'} ${changeText}%</span>`;
+                    ui.topMoversList.appendChild(li);
+                });
+            } else { ui.topMoversList.innerHTML = '<li><span>AI 예측 상승률 정보가 없습니다. (학습 필요)</span></li>'; }
+            ui.recommendationArea.style.display = 'block';
+        });
+    }
+
+    function updateCurrentPrice(ticker) {
+        // ... (기존 코드 유지)
+        fetch('http://127.0.0.1:5000/get_current_price', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker: ticker })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.price) {
+                ui.currentPrice.innerText = formatCurrency(data.price, ticker);
+                ui.updateTime.innerText = `Last update: ${data.time}`;
+            }
+        }).catch(err => console.error("현재가 업데이트 오류:", err));
+    }
+
+    function getAndRenderSimpleChart(ticker) {
+        // ... (기존 코드 유지)
+        const selectedBtn = ui.periodButtonsContainer.querySelector('.period-btn.active');
+        const period = selectedBtn ? selectedBtn.dataset.value : 'max';
+
+        fetch('http://127.0.0.1:5000/get_simple_chart_data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker: ticker, period: period })
+        })
+        .then(res => res.ok ? res.json() : Promise.reject('서버 응답 오류'))
+        .then(data => {
+            if (data.status === 'error') throw new Error(data.message);
+            ui.chartTitle.innerText = '📊 주가 차트';
+            ui.simpleChartContainer.style.display = 'block';
+            ui.aiChartContainer.style.display = 'none';
+            ui.newsContainer.style.display = 'none'; 
+            renderSimpleChart(data);
+            setUIState('content');
+            
+            updateCurrentPrice(ticker);
+            priceUpdateInterval = setInterval(() => updateCurrentPrice(ticker), 60000);
+            fetchAndDisplayRecommendations(ticker);
+        })
+        .catch(err => {
+            ui.error.innerText = `'${ticker}' 차트 로딩 실패: ${err.message || err}`;
+            setUIState('error');
+        });
+    }
+    
+    function renderSimpleChart(chartData) {
+        // ... (기존 코드 유지)
+        if (simpleChart) simpleChart.destroy();
+        simpleChart = new Chart(document.getElementById('simpleChart'), {
+            type: 'line',
+            data: {
+                labels: chartData.dates,
+                datasets: [{ label: '주가', data: chartData.prices, borderColor: '#27ae60', borderWidth: 2, pointRadius: 0, tension: 0.1 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+                scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(0,0,0,0.05)' } } }
+            }
+        });
+    }
+
+    // startAiAnalysis: (AI 분석 복구)
+    function startAiAnalysis(ticker) {
+        const selectedBtn = ui.periodButtonsContainer.querySelector('.period-btn.active');
+        if (!selectedBtn || selectedBtn.classList.contains('disabled')) {
+            alert('AI 분석을 위해서는 6개월 이상의 기간을 선택해야 합니다.');
+            setUIState('welcome');
+            return;
+        }
+        setControlsDisabled(true);
+        const historical_days = parseInt(selectedBtn.dataset.value, 10);
+        
+        fetch('http://127.0.0.1:5000/switch_ticker', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker: ticker, historical_days: historical_days })
+        });
+    }
+
+    // socket.on('training_complete'): (AI 분석 복구)
+    socket.on('training_complete', (data) => {
+        console.log("✅ 'training_complete' 신호를 서버로부터 받았습니다.", data);
+
+        if (data.status === 'success' && data.ticker === activeTicker && currentMode === 'ai') {
+            console.log("✅ 조건문 통과! AI 결과 데이터 요청을 시작합니다.");
+
+            fetch('http://127.0.0.1:5000/get_ai_results', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticker: data.ticker })
+            })
+            .then(res => {
+                if (!res.ok) {
+                    return Promise.reject(`서버 응답 오류: ${res.status}`);
+                }
+                return res.json();
+            })
+            .then(historicalData => {
+                if (!historicalData || !historicalData.dates || historicalData.dates.length === 0) {
+                     return Promise.reject('수신된 AI 데이터가 비어있습니다.');
+                }
+                console.log("✅ AI 결과 데이터를 성공적으로 받았습니다.");
+
+                historicalDataCacheForUpdate = historicalData;
+                ui.chartTitle.innerText = '📊 과거 예측 성능 비교';
+                ui.simpleChartContainer.style.display = 'none';
+                ui.aiChartContainer.style.display = 'block';
+                ui.newsContainer.style.display = 'none'; 
+
+                updateCurrentPrice(activeTicker);
+                priceUpdateInterval = setInterval(() => updateCurrentPrice(activeTicker), 60000);
+                fetchAndDisplayRecommendations(activeTicker);
+
+                renderAiChart(historicalData);
+                setUIState('content');
+            })
+            .catch(err => {
+                console.error("❗️ AI 결과 처리 중 오류 발생:", err);
+                ui.error.innerText = `AI 결과 처리 중 오류: ${err}`;
+                setUIState('error');
+            })
+            .finally(() => {
+                setControlsDisabled(false);
+            });
+        } else {
+            console.warn("⚠️ 신호는 받았지만, 조건이 맞지 않아 무시합니다.", {
+                "서버 ticker": data.ticker,
+                "브라우저 ticker": activeTicker,
+                "현재 모드": currentMode
+            });
+            setControlsDisabled(false);
+        }
+    });
+
+    socket.on('training_error', (data) => {
+        setControlsDisabled(false);
+        if (currentMode !== 'ai') return;
+        ui.error.innerText = data.message;
+        setUIState('error');
+    });
+
+    // renderAiChart: (AI 분석 복구)
+    function renderAiChart(data) {
+        createChartControls(Object.keys(data.predictions || {}));
+        updateAiChart(data);
+    }
+    
+    // updateAiChart: (AI 분석 복구)
+   function updateAiChart(data) {
+        if (!data) return;
+        const activeModels = Array.from(ui.historicalControls.querySelectorAll('.control-btn.active')).map(btn => btn.dataset.model);
+        const datasets = [];
+        datasets.push({ 
+            label: '실제 주가', 
+            data: data.actuals, 
+            borderColor: '#34495e', 
+            borderWidth: 2.5, 
+            pointRadius: 0, 
+            hidden: !activeModels.includes('actuals') 
+        });
+        
+        Object.keys(data.predictions || {}).forEach((model, i) => {
+            datasets.push({ 
+                label: `${model.toUpperCase()} 예측`, 
+                data: data.predictions[model], 
+                borderColor: chartColors[i % chartColors.length], 
+                borderWidth: 1.5, pointRadius: 0, borderDash: [5, 5],
+                hidden: !activeModels.includes(model)
+            });
+        });
+
+        if (historicalChart) historicalChart.destroy();
+        
+        historicalChart = new Chart(document.getElementById('historicalChart'), {
+             type: 'line',
+             data: { labels: data.dates, datasets: datasets },
+             options: getAiChartOptions(data)
+        });
+    }
+
+    // getAiChartOptions: (AI 분석 복구)
+    function getAiChartOptions(data) {
+        return {
+            responsive: true, maintainAspectRatio: false,
+            scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(0,0,0,0.05)' } } },
+            plugins: {
+                legend: { display: false },
+                tooltip: { mode: 'index', intersect: false },
+                annotation: {
+                    annotations: data.test_start_index > 0 ? {
+                        line: { type: 'line', xMin: data.test_start_index, xMax: data.test_start_index, borderColor: 'rgba(231,76,60,0.7)', borderWidth: 2, borderDash: [6,6] },
+                        label: { type: 'label', xValue: data.test_start_index, yValue: (ctx) => ctx.chart.scales.y.max * 0.95, content: ['Test Period'], color: 'rgba(231,76,60,0.7)'}
+                    } : {}
+                }
+            }
+        };
+    }
+
+    // createChartControls: (AI 분석 복구)
+    function createChartControls(models) {
+        const allModels = ['actuals', ...models];
+        ui.historicalControls.innerHTML = '';
+        allModels.forEach((model, i) => {
+            const btn = document.createElement('button');
+            const color = model === 'actuals' ? '#34495e' : chartColors[(i - 1) % chartColors.length];
+            const isActive = model === 'actuals';
+            btn.className = `control-btn ${isActive ? 'active' : ''}`;
+            btn.innerText = model === 'actuals' ? '실제 주가' : model.toUpperCase();
+            btn.dataset.model = model;
+            btn.style.borderColor = color;
+            if (isActive) {
+                btn.style.backgroundColor = color;
+                btn.style.color = 'white';
+            }
+            ui.historicalControls.appendChild(btn);
+        });
+    }
+
+    // --- 뉴스 분석 전용 로직 (BERT & LLM) ---
+    function startNewsAnalysis(ticker, index, mode) {
+        setControlsDisabled(true); 
+        
+        ui.newsButtons.querySelectorAll('.news-btn').forEach((btn) => {
+            btn.classList.remove('active');
+            if (parseInt(btn.dataset.index) === index) btn.classList.add('active');
+        });
+
+        setUIState('loading');
+        ui.chartTitle.innerText = `📰 ${mode.toUpperCase()} 분석 (${index + 1}번째 최신 유효 기사)`; 
+        
+        fetch('http://127.0.0.1:5000/analyze_news_sentiment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker: ticker, index: index, mode: mode }) 
+        })
+        .then(res => res.ok ? res.json() : Promise.reject(new Error(`서버 응답 오류: ${res.status} (${res.statusText})`)))
+        .then(data => {
+            if (data.status && data.status.startsWith('error')) throw new Error(data.message);
+            
+            ui.newsButtons.querySelectorAll('.news-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            const actualIndex = data.analyzed_index;
+            const analyzedBtn = ui.newsButtons.querySelector(`[data-index="${actualIndex}"]`);
+            if(analyzedBtn) analyzedBtn.classList.add('active');
+
+            renderNewsAnalysis(data);
+            setUIState('content');
+            
+            updateCurrentPrice(ticker); 
+            priceUpdateInterval = setInterval(() => updateCurrentPrice(ticker), 60000);
+            ui.recommendationArea.style.display = 'none'; 
+        })
+        .catch(err => {
+            let errorMessage = err.message || err.toString();
+            if (errorMessage.includes('서버 응답 오류')) {
+                errorMessage = `분석 중 통신 오류 발생. (서버 응답: ${err.message.split('(')[1] || '확인 필요'})`;
+            } else if (errorMessage.includes('요청된')) {
+                 errorMessage = errorMessage.replace('Error: ', ''); 
+            }
+            
+            ui.error.innerText = `뉴스 분석 실패: ${errorMessage}`;
+            setUIState('error');
+        })
+        .finally(() => {
+            setControlsDisabled(false); 
+        });
+    }
+    
+    function renderNewsAnalysis(data) {
+        const finalLabel = data.final_label || 'NEUTRAL';
+        const analysisMode = data.analysis_mode || 'BERT'; 
+        let colorClass = 'sentiment-neutral'; 
+
+        const isCached = data.status === 'success (cached)';
+        const cacheIndicator = isCached 
+                                ? '<span style="color: var(--primary-color); font-weight: bold; margin-left: 10px; font-size: 0.8em;">(✅ 캐시된 결과)</span>'
+                                : '';
+
+
+        if (finalLabel === 'POSITIVE') colorClass = 'sentiment-positive';
+        if (finalLabel === 'NEGATIVE') colorClass = 'sentiment-negative';
+
+        ui.newsArticleIndex.innerHTML = `<a href="${data.url || '#'}" target="_blank" style="color: inherit; text-decoration: underline;">${data.title}</a> <span style="font-size: 0.7em; color: #7f8c8d;">(${data.source})</span>${cacheIndicator}`;
+        ui.analysisFinalLabel.className = ''; 
+        ui.analysisFinalLabel.classList.add(colorClass);
+        ui.analysisFinalLabel.innerText = finalLabel;
+        ui.analysisFinalLabel.style.borderBottomColor = colorClass.includes('positive') ? 'var(--green)' : colorClass.includes('negative') ? 'var(--red)' : 'var(--secondary-color)';
+        
+        // --- 모드에 따른 섹션 표시/숨김 ---
+        if (analysisMode === 'LLM') {
+            ui.bertAnalysisSection.style.display = 'none';
+            ui.llmSummarySection.style.display = 'block';
+
+            // LLM 전용 콘텐츠 렌더링
+            ui.llmSummary.innerHTML = data.summary.trim() || '요약 내용을 가져오지 못했습니다.';
+            ui.llmKeyPoints.innerHTML = (data.key_sentiment_points || []).map(p => `<li>${p}</li>`).join('');
+            ui.analysisNote.innerText = '분석은 기사 전체를 기반으로 LLM이 요약한 내용입니다.';
+        } else { // BERT 
+            ui.bertAnalysisSection.style.display = 'block';
+            ui.llmSummarySection.style.display = 'none';
+            
+            // BERT 전용 콘텐츠 렌더링
+            ui.modelComparison.innerHTML = `
+                <p><strong>긍정 문장: ${data.positive_count || 0}개</strong> / <strong>부정 문장: ${data.negative_count || 0}개</strong> (전체 유효 문장: ${data.total_sentences}개)</p>
+                <p>Model 1 (BERT): ${data.model1_score !== undefined ? data.model1_score.toFixed(4) : '-'} (평균 점수)</p>
+                <p>Model 2 (BERT): ${data.model2_score !== undefined ? data.model2_score.toFixed(4) : '-'} (평균 점수)</p>
+            `;
+            ui.analyzedSentencesList.innerHTML = (data.analyzed_sentences || []).map(s => `<span>${s.trim()}</span>`).join('<br><br>');
+            ui.totalSentences.innerText = data.total_sentences || 0;
+            ui.analysisNote.innerText = '분석은 상위 5개 문장을 기반으로 합니다.';
+        }
+        
+        // 원문 전체 표시 (공통)
+        const fullText = data.full_original_text.trim();
+        ui.newsOriginalText.innerHTML = fullText.replace(/\n/g, '<br><br>').trim() || "가져온 기사 원문이 비어있습니다.";
+        ui.newsOriginalText.style.borderLeftColor = '#bdc3c7'; 
+        ui.newsOriginalText.style.backgroundColor = 'white'; 
+    }
+
+    function formatCurrency(price, ticker) {
+        if (price === null || price === undefined) return '-';
+        const options = ticker?.endsWith('.KS') ? { style: 'currency', currency: 'KRW' } : { style: 'currency', currency: 'USD' };
+        return new Intl.NumberFormat(ticker?.endsWith('.KS') ? 'ko-KR' : 'en-US', options).format(price);
+    }
+    
+    function handleRecClick(e) {
+        const li = e.target.closest('li[data-ticker]');
+        if (li && li.dataset.ticker) {
+            const newTicker = li.dataset.ticker;
+            if (!portfolio.includes(newTicker)) {
+                portfolio.unshift(newTicker);
+            }
+            activeTicker = newTicker;
+            renderPortfolio();
+            startAnalysis(activeTicker);
+        }
+    }
+
+    ui.modeSimpleBtn.addEventListener('click', () => switchMode('simple'));
+    ui.modeAiBtn.addEventListener('click', () => switchMode('ai'));
+    ui.modeNewsBtn.addEventListener('click', () => switchMode('bert')); 
+    ui.modeLlmBtn.addEventListener('click', () => switchMode('llm')); // LLM 모드 리스너 추가
+    
+    // 뉴스 버튼 클릭 이벤트 리스너
+    ui.newsButtons.addEventListener('click', (e) => {
+        const btn = e.target.closest('.news-btn');
+        if (btn && activeTicker) {
+            const index = parseInt(btn.dataset.index, 10);
+            startNewsAnalysis(activeTicker, index, currentMode); // 현재 모드(bert/llm) 전달
+        } else if (btn && !activeTicker) {
+            alert('먼저 포트폴리오에서 종목을 선택해주세요.');
+        }
+    });
+
+    ui.periodButtonsContainer.addEventListener('click', (e) => {
+        if (e.target.matches('.period-btn:not(.disabled)')) {
+            ui.periodButtonsContainer.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            if (activeTicker) startAnalysis(activeTicker);
+        } else if (e.target.matches('.disabled')) {
+            alert('AI 모델 분석을 위해서는 최소 6개월 이상의 데이터가 필요합니다.');
+        }
+    });
+    ui.topMoversList.addEventListener('click', handleRecClick);
+    ui.portfolioList.addEventListener('click', (e) => {
+    const li = e.target.closest('li');
+    if (!li) return;
+    const ticker = li.dataset.ticker;
+
+    if (e.target.matches('.remove-btn')) {
+        // --- 1. 삭제 버튼 클릭 ---
+        portfolio = portfolio.filter(t => t !== ticker);
+        if (ticker === activeTicker) {
+            activeTicker = null;
+            if(priceUpdateInterval) clearInterval(priceUpdateInterval);
+            setUIState('welcome');
+        }
+        renderPortfolio();
+
+    } else if (ticker !== activeTicker) {
+        // --- 2. 종목명 클릭 ---
+        activeTicker = ticker;
+        renderPortfolio();
+        startAnalysis(activeTicker);
+    }
+});
+
+    ui.historicalControls.addEventListener('click', (e) => {
+        if (e.target.matches('.control-btn')) {
+            e.target.classList.toggle('active');
+            e.target.style.backgroundColor = e.target.classList.contains('active') ? e.target.style.borderColor : 'white';
+            e.target.style.color = e.target.classList.contains('active') ? 'white' : '#333';
+            updateAiChart(historicalDataCacheForUpdate);
+        }
+    });
+    ui.addTickerBtn.addEventListener('click', addTicker);
+    ui.tickerInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addTicker(); });
+    
+    async function populateIndustryDropdown() {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/get_all_industries');
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.status === 'success') {
+            data.industries.forEach(industry => {
+                const option = document.createElement('option');
+                option.value = industry;
+                option.textContent = industry;
+                ui.industrySelect.appendChild(option);
+            });
+        }
+    } catch (e) { console.error("산업 목록 로딩 실패:", e); }
+}
+
+async function fetchStocksByIndustry(industry) {
+    if (!industry) {
+        ui.industryStocksList.innerHTML = '<li><span>산업을 선택하세요.</span></li>';
+        return;
+    }
+    ui.industryStocksList.innerHTML = '<li><span>로딩 중...</span></li>';
+    try {
+        const response = await fetch('http://127.0.0.1:5000/get_stocks_by_industry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ industry: industry })
+        });
+        if (!response.ok) throw new Error('서버 응답 오류');
+        const data = await response.json();
+        ui.industryStocksList.innerHTML = '';
+        if (data.status === 'success' && data.stocks.length > 0) {
+            data.stocks.forEach(stock => {
+                const li = document.createElement('li');
+                li.dataset.ticker = stock.stock_code;
+                li.innerHTML = `<div><span class="rec-name">${stock.stock_name}</span><span class="rec-ticker">${stock.stock_code}</span></div>`;
+                ui.industryStocksList.appendChild(li);
+            });
+        } else {
+            ui.industryStocksList.innerHTML = '<li><span>해당 산업의 종목이 없습니다.</span></li>';
+        }
+    } catch (e) {
+        ui.industryStocksList.innerHTML = `<li><span style="color: var(--red);">로딩 실패</span></li>`;
+    }
+}
+
+ui.industrySelect.addEventListener('change', () => {
+    fetchStocksByIndustry(ui.industrySelect.value);
+});
+
+ui.industryStocksList.addEventListener('click', handleRecClick);
+    renderPortfolio();
+    populateIndustryDropdown();
+    setUIState('welcome');
+    renderPeriodButtons();
+});
+</script>
+<style>
+  /* Button */
+  .sa-alert-btn{position:fixed;top:16px;right:16px;z-index:9999;padding:10px 14px;border:0;border-radius:10px;background:#1f6feb;color:#fff;cursor:pointer;font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+  .sa-alert-btn:hover{opacity:.92}
+
+  /* Modal */
+  .sa-modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9998}
+  .sa-hidden{display:none}
+  .sa-modal-content{width:min(920px,92vw);max-height:80vh;overflow:auto;background:#111827;color:#e5e7eb;border-radius:16px;box-shadow:0 20px 40px rgba(0,0,0,.3)}
+  .sa-modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid #1f2937}
+  .sa-close-btn{background:transparent;color:#9ca3af;border:0;font-size:22px;cursor:pointer}
+  .sa-filters{display:grid;grid-template-columns:1.2fr .8fr .8fr 1fr auto auto;gap:10px;padding:12px 16px;border-bottom:1px solid #1f2937}
+  .sa-filters input,.sa-filters select{background:#0b1220;color:#e5e7eb;border:1px solid #243047;border-radius:10px;padding:8px 10px}
+  .sa-btn-primary{background:#2563eb;color:#fff;border:0;border-radius:10px;padding:8px 12px;font-weight:600}
+  .sa-btn-secondary{background:#374151;color:#fff;border:0;border-radius:10px;padding:8px 12px}
+
+  .sa-list{padding:12px;display:grid;gap:10px}
+  .sa-card{background:#0b1220;border:1px solid #1f2937;border-radius:14px;padding:12px 14px}
+  .sa-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .sa-tag{display:inline-block;font-size:12px;padding:4px 8px;border-radius:999px;background:#1f2937;color:#cbd5e1;text-transform:uppercase}
+  .sa-date{font-size:12px;color:#9ca3af}
+  .sa-stock{font-weight:700;letter-spacing:.3px;margin-bottom:4px}
+  .sa-msg{margin:0;color:#d1d5db;line-height:1.4}
+  #portfolio-list li {
+    display: flex; justify-content: space-between; align-items: center;
+}
+.portfolio-item-main {
+    flex-grow: 1; cursor: pointer;
+}
+.watchlist-cb {
+    margin-left: 10px; flex-shrink: 0;
+    /* 체크박스 크기 키우기 */
+    transform: scale(1.3);
+    cursor: pointer;
+}
+/* [수정] 기존 remove-btn 스타일과 충돌 방지 */
+#portfolio-list li:hover .remove-btn {
+    opacity: 1; margin-left: 5px;
+}
+</style>
+
+<button id="saAlertBtn" class="sa-alert-btn" type="button">알림</button>
+
+<div id="saModal" class="sa-modal sa-hidden" role="dialog" aria-modal="true" aria-labelledby="saModalTitle">
+  <div class="sa-modal-content">
+    <div class="sa-modal-header">
+      <h3 id="saModalTitle">알림 센터</h3>
+      <button id="saClose" class="sa-close-btn" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="sa-filters">
+      <input id="saStock" type="text" placeholder="종목코드 (예: 005930.KS, AAPL)" />
+      <input id="saFrom" type="date"/>
+      <input id="saTo" type="date"/>
+      <select id="saType">
+        <option value="">전체</option>
+        <option value="model_up70">AI 상승≥70%</option>
+        <option value="model_down70">AI 하락≥70%</option>
+        <option value="consensus_up">AI 합의(상승)</option>
+        <option value="consensus_down">AI 합의(하락)</option> 
+      </select>
+      <button id="saSearch" class="sa-btn-primary" type="button">조회</button>
+      <button id="saRun" class="sa-btn-secondary" type="button" title="최근 데이터로 알림 재생성">알림생성</button>
+    </div>
+
+    <div id="saList" class="sa-list" aria-live="polite"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = (id)=>document.getElementById(id);
+  const modal = $('saModal');
+  const list  = $('saList');
+
+  // Open/Close
+  $('saAlertBtn').onclick = ()=> modal.classList.remove('sa-hidden');
+  $('saClose').onclick    = ()=> modal.classList.add('sa-hidden');
+  window.addEventListener('click', (e)=>{ if(e.target===modal) modal.classList.add('sa-hidden'); });
+
+  async function fetchAlerts(params){
+    const qs = new URLSearchParams(params);
+    const res = await fetch(`/api/alerts?${qs.toString()}`);
+    if(!res.ok) throw new Error('알림 조회 실패');
+    return res.json();
+  }
+
+  function render(items){
+    if(!items || !items.items || !items.items.length){
+      list.innerHTML = '<p style="padding:12px;">알림이 없습니다.</p>';
+      return;
+    }
+    list.innerHTML = items.items.map(a=>`
+      <div class="sa-card">
+        <div class="sa-row">
+          <span class="sa-tag">${a.alert_type}</span>
+          <span class="sa-date">${a.date}</span>
+        </div>
+        <div class="sa-stock">${a.stock_code}</div>
+        <p class="sa-msg">${a.message}</p>
+      </div>
+    `).join('');
+  }
+
+  // 조회
+  $('saSearch').onclick = async ()=>{
+    const params = {};
+    const stock = $('saStock').value.trim();
+    const from  = $('saFrom').value;
+    const to    = $('saTo').value;
+    const type  = $('saType').value;
+    if(stock) params.stock_code = stock;
+    if(from)  params.from = from;
+    if(to)    params.to = to;
+    if(type)  params.type = type;
+    params.limit = 200;
+
+    try{
+      const data = await fetchAlerts(params);
+      render(data);
+    }catch(err){ alert(err.message || '조회 중 오류'); }
+  };
+
+  // 알림 생성 → 즉시 조회
+  $('saRun').onclick = async ()=>{
+    const stock = $('saStock').value.trim();
+    if(!stock){ alert('알림 생성 전 종목코드를 입력하세요.'); return; }
+    try{
+      const res = await fetch('/api/alerts/run',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ stock_code: stock, backfill_days: 5 })
+      });
+      if(!res.ok) throw new Error('알림 생성 실패');
+      $('saSearch').click();
+    }catch(err){ alert(err.message || '생성 중 오류'); }
+  };
+
+  // 모달 열리면 기본 조회 시도(전체)
+  const observer = new MutationObserver(()=> {
+    if(!modal.classList.contains('sa-hidden')) $('saSearch').click();
+  });
+  observer.observe(modal,{attributes:true,attributeFilter:['class']});
+})();
+</script>
+</body>
+</html>
